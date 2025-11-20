@@ -165,7 +165,8 @@ public protocol EmulatedCBPeripheralDelegate: AnyObject {
     func peripheral(_ peripheral: EmulatedCBPeripheral, didModifyServices invalidatedServices: [EmulatedCBService])
 
     /// Optional: Called when an L2CAP channel is opened
-    func peripheral(_ peripheral: EmulatedCBPeripheral, didOpen channel: CBL2CAPChannel?, error: Error?)
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    func peripheral(_ peripheral: EmulatedCBPeripheral, didOpen channel: EmulatedCBL2CAPChannel?, error: Error?)
 
     /// Optional: Called when ready to send write without response
     func peripheralIsReady(toSendWriteWithoutResponse peripheral: EmulatedCBPeripheral)
@@ -217,7 +218,8 @@ public extension EmulatedCBPeripheralDelegate {
     ) {}
     func peripheral(_ peripheral: EmulatedCBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {}
     func peripheral(_ peripheral: EmulatedCBPeripheral, didModifyServices invalidatedServices: [EmulatedCBService]) {}
-    func peripheral(_ peripheral: EmulatedCBPeripheral, didOpen channel: CBL2CAPChannel?, error: Error?) {}
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    func peripheral(_ peripheral: EmulatedCBPeripheral, didOpen channel: EmulatedCBL2CAPChannel?, error: Error?) {}
     func peripheralIsReady(toSendWriteWithoutResponse peripheral: EmulatedCBPeripheral) {}
 }
 
@@ -272,7 +274,12 @@ public protocol EmulatedCBPeripheralManagerDelegate: AnyObject {
     )
 
     /// Optional: Called when an L2CAP channel is opened
-    func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, didOpen channel: CBL2CAPChannel?, error: Error?)
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, didOpen channel: EmulatedCBL2CAPChannel?, error: Error?)
+
+    /// Optional: Called when ANCS authorization is updated for a central (iOS 13.1+)
+    @available(iOS 13.1, *)
+    func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, didUpdateANCSAuthorizationFor central: EmulatedCBCentral)
 
     /// Optional: Called when restoring state
     func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, willRestoreState dict: [String: Any])
@@ -305,6 +312,9 @@ public extension EmulatedCBPeripheralManagerDelegate {
         didUnpublishL2CAPChannel PSM: CBL2CAPPSM,
         error: Error?
     ) {}
-    func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, didOpen channel: CBL2CAPChannel?, error: Error?) {}
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, didOpen channel: EmulatedCBL2CAPChannel?, error: Error?) {}
+    @available(iOS 13.1, *)
+    func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, didUpdateANCSAuthorizationFor central: EmulatedCBCentral) {}
     func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, willRestoreState dict: [String: Any]) {}
 }

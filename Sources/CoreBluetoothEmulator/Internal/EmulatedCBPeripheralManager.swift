@@ -260,10 +260,67 @@ public class EmulatedCBPeripheralManager: NSObject, @unchecked Sendable {
         // Not implemented for emulator
     }
 
+    // MARK: - L2CAP Channels
+
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    public func publishL2CAPChannel(withEncryption encryptionRequired: Bool) {
+        guard state == .poweredOn else { return }
+
+        Task {
+            do {
+                let psm = try await EmulatorBus.shared.publishL2CAPChannel(
+                    peripheralIdentifier: identifier,
+                    encryptionRequired: encryptionRequired
+                )
+
+                notifyDelegate { delegate in
+                    delegate.peripheralManager(self, didPublishL2CAPChannel: psm, error: nil)
+                }
+            } catch {
+                notifyDelegate { delegate in
+                    delegate.peripheralManager(self, didPublishL2CAPChannel: 0, error: error)
+                }
+            }
+        }
+    }
+
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    public func unpublishL2CAPChannel(_ psm: CBL2CAPPSM) {
+        Task {
+            await EmulatorBus.shared.unpublishL2CAPChannel(
+                peripheralIdentifier: identifier,
+                psm: psm
+            )
+
+            notifyDelegate { delegate in
+                delegate.peripheralManager(self, didUnpublishL2CAPChannel: psm, error: nil)
+            }
+        }
+    }
+
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    internal func notifyL2CAPChannelOpened(_ channel: EmulatedCBL2CAPChannel) async {
+        let centralProxy = EmulatedCBCentral(identifier: channel.peer.identifier)
+
+        notifyDelegate { delegate in
+            delegate.peripheralManager(self, didOpen: channel, error: nil)
+        }
+    }
+
     // MARK: - Authorization
 
     public class func authorizationStatus() -> CBPeripheralManagerAuthorizationStatus {
         return .authorized
+    }
+
+    @available(iOS 13.1, *)
+    internal func notifyANCSAuthorizationUpdate(for centralIdentifier: UUID) async {
+        let status = await EmulatorBus.shared.getANCSAuthorization(for: centralIdentifier)
+        let centralProxy = EmulatedCBCentral(identifier: centralIdentifier)
+
+        notifyDelegate { delegate in
+            delegate.peripheralManager(self, didUpdateANCSAuthorizationFor: centralProxy)
+        }
     }
 
     // MARK: - Internal Methods (called by EmulatorBus)

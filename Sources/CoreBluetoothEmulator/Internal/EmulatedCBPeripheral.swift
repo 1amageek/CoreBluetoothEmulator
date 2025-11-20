@@ -320,6 +320,31 @@ public class EmulatedCBPeripheral: NSObject, @unchecked Sendable {
         }
     }
 
+    // MARK: - L2CAP Channels
+
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    public func openL2CAPChannel(_ psm: CBL2CAPPSM) {
+        guard state == .connected else { return }
+
+        Task {
+            do {
+                let channel = try await EmulatorBus.shared.openL2CAPChannel(
+                    centralIdentifier: centralManagerIdentifier,
+                    peripheralIdentifier: peripheralManagerIdentifier,
+                    psm: psm
+                )
+
+                notifyDelegate { delegate in
+                    delegate.peripheral(self, didOpen: channel, error: nil)
+                }
+            } catch {
+                notifyDelegate { delegate in
+                    delegate.peripheral(self, didOpen: nil, error: error)
+                }
+            }
+        }
+    }
+
     // MARK: - Maximum Write Length
 
     public func maximumWriteValueLength(for type: CBCharacteristicWriteType) -> Int {

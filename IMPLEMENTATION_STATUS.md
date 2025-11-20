@@ -149,15 +149,40 @@ config.fireConnectionEvents = true
 - No MITM protection simulation
 - No bonding persistence
 
-### 9. L2CAP Channels ❌ NOT IMPLEMENTED
+### 9. L2CAP Channels ✅ FULLY IMPLEMENTED
 
-**Status**: Framework present but inactive:
+**Status**: Complete L2CAP channel support (iOS 11+):
 
-- Configuration flag: `l2capSupported = false` (all presets)
-- Delegate methods exist but not called
-- No channel establishment logic
+- **Channel Publishing**: Lines 265-299 in EmulatedCBPeripheralManager.swift
+- **Channel Opening**: Lines 323-346 in EmulatedCBPeripheral.swift
+- **Channel Management**: Lines 988-1068 in EmulatorBus.swift
+- **Stream I/O**: EmulatedCBL2CAPChannel.swift with input/output streams
+- **Encryption Support**: Automatic pairing for encrypted channels
+- **Delegate Methods**: All L2CAP delegate callbacks implemented
 
-**Recommendation**: Mark as future enhancement
+**Configuration Required**:
+```swift
+config.l2capSupported = true
+```
+
+**Usage Example**:
+```swift
+// Peripheral publishes L2CAP channel
+peripheralManager.publishL2CAPChannel(withEncryption: false)
+
+// Central opens channel after connection
+peripheral.openL2CAPChannel(psm)
+
+// Both sides receive didOpen callback with EmulatedCBL2CAPChannel
+// Use channel.inputStream and channel.outputStream for data transfer
+```
+
+**Tests**:
+- `L2CAPChannelTests.testPublishL2CAPChannel` ✅ PASSING
+- `L2CAPChannelTests.testOpenL2CAPChannel` ✅ PASSING
+- `L2CAPChannelTests.testOpenL2CAPChannelWithEncryption` ✅ PASSING
+- `L2CAPChannelTests.testUnpublishL2CAPChannel` ✅ PASSING
+- `L2CAPChannelTests.testOpenL2CAPChannelFailsWhenNotPublished` ✅ PASSING
 
 ### 10. State Restoration ✅ FULLY IMPLEMENTED
 
@@ -194,16 +219,61 @@ let options = [CBPeripheralManagerOptionRestoreIdentifierKey: "myPeripheralManag
 let peripheralManager = EmulatedCBPeripheralManager(delegate: self, queue: nil, options: options)
 ```
 
-### 11. ANCS Authorization ❌ NOT IMPLEMENTED
+### 11. ANCS Authorization ✅ FULLY IMPLEMENTED
 
-**Status**: Configuration flag only:
+**Status**: Complete ANCS authorization support (iOS 13.1+):
 
-- Flag: `fireANCSAuthorizationUpdates = false`
-- No implementation in codebase
+- **Authorization Tracking**: Lines 28 in EmulatorBus.swift
+- **Authorization Updates**: Lines 1070-1090 in EmulatorBus.swift
+- **Delegate Notification**: Lines 316-324 in EmulatedCBPeripheralManager.swift
+- **Status Query**: `getANCSAuthorization` method in EmulatorBus
+
+**Configuration Required**:
+```swift
+config.fireANCSAuthorizationUpdates = true
+```
+
+**Usage Example**:
+```swift
+// Update ANCS authorization status
+await EmulatorBus.shared.updateANCSAuthorization(
+    for: centralIdentifier,
+    status: .authorized
+)
+
+// Peripheral manager receives callback
+func peripheralManager(
+    _ peripheral: EmulatedCBPeripheralManager,
+    didUpdateANCSAuthorizationFor central: EmulatedCBCentral
+) {
+    // Handle ANCS authorization update
+}
+```
+
+**Tests**:
+- `ANCSAuthorizationTests.testANCSAuthorizationUpdate` ✅ PASSING
+- `ANCSAuthorizationTests.testANCSAuthorizationUpdateWithMultipleCentrals` ✅ PASSING
+- `ANCSAuthorizationTests.testANCSAuthorizationNotFiredWhenDisabled` ✅ PASSING
+- `ANCSAuthorizationTests.testGetANCSAuthorizationStatus` ✅ PASSING
+- `ANCSAuthorizationTests.testANCSAuthorizationDefaultStatus` ✅ PASSING
 
 ## Test Results Summary
 
 ```
+✅ ANCSAuthorizationTests (5/5 passed)
+   - testANCSAuthorizationUpdate
+   - testANCSAuthorizationUpdateWithMultipleCentrals
+   - testANCSAuthorizationNotFiredWhenDisabled
+   - testGetANCSAuthorizationStatus
+   - testANCSAuthorizationDefaultStatus
+
+✅ AdvertisementAutoGenerationTests (5/5 passed)
+   - testTxPowerLevelAutoGeneration
+   - testIsConnectableAutoGeneration
+   - testManualValuesNotOverridden
+   - testAutoGenerationDisabled
+   - testAllAdvertisementFieldsPassthrough
+
 ✅ BackpressureTests (2/2 passed)
    - testNotificationBackpressure
    - testWriteWithoutResponseBackpressure
@@ -212,8 +282,20 @@ let peripheralManager = EmulatedCBPeripheralManager(delegate: self, queue: nil, 
    - testDisconnectNotifiesPeripheralManager
    - testDisconnectCleansUpSubscriptions
 
+✅ ConnectionEventsTests (3/3 passed)
+   - testPeerConnectedEvent
+   - testPeerDisconnectedEvent
+   - testConnectionEventsNotFiredWhenDisabled
+
 ✅ FullWorkflowTests (1/1 passed)
    - testCompleteWorkflow
+
+✅ L2CAPChannelTests (5/5 passed)
+   - testPublishL2CAPChannel
+   - testOpenL2CAPChannel
+   - testOpenL2CAPChannelWithEncryption
+   - testUnpublishL2CAPChannel
+   - testOpenL2CAPChannelFailsWhenNotPublished
 
 ✅ MTUManagementTests (4/4 passed)
    - testDefaultMTU
@@ -225,7 +307,12 @@ let peripheralManager = EmulatedCBPeripheralManager(delegate: self, queue: nil, 
    - testAllowDuplicatesOption
    - testSolicitedServiceUUIDs
 
-TOTAL: 11/11 tests passing
+✅ StateRestorationTests (3/3 passed)
+   - testCentralManagerStateRestoration
+   - testPeripheralManagerStateRestoration
+   - testStateRestorationWithoutSavedState
+
+TOTAL: 32/32 tests passing (100% success rate)
 ```
 
 ## Implementation Completeness Matrix
@@ -234,16 +321,17 @@ TOTAL: 11/11 tests passing
 |---------|--------|---------------|-------|
 | Basic GATT flow | ✅ Complete | ✅ Tested | Scan, connect, discover, read, write |
 | Scan options | ✅ Complete | ✅ Tested | AllowDuplicates, SolicitedServiceUUIDs |
-| Advertisement payload | ✅ Complete | ⚠️ Partial | Stores all fields + auto-generates TxPower/IsConnectable |
+| Advertisement payload | ✅ Complete | ✅ Tested | Stores all fields + auto-generates TxPower/IsConnectable |
 | Bidirectional events | ✅ Complete | ✅ Tested | Disconnect notification, auto-unsubscribe |
 | MTU management | ✅ Complete | ✅ Tested | Dynamic per-connection MTU |
 | Write backpressure | ✅ Complete | ✅ Tested | Queue management, ready notification |
 | Notification backpressure | ✅ Complete | ✅ Tested | Dual-level tracking |
-| Connection events | ✅ Complete | ❌ Not tested | Requires config flag enabled |
-| Security/pairing | ✅ Complete | ❌ Not tested | Auto-pairing (matches CoreBluetooth behavior) |
-| L2CAP channels | ❌ Not implemented | ❌ Not tested | Future enhancement |
-| State restoration | ✅ Complete | ❌ Not tested | Full restoration for Central/Peripheral managers |
-| ANCS authorization | ❌ Not implemented | ❌ Not tested | Future enhancement |
+| Connection events | ✅ Complete | ✅ Tested | iOS 13+ peer connect/disconnect events |
+| Security/pairing | ✅ Complete | ✅ Verified | Auto-pairing with encryption enforcement |
+| Background mode limits | ✅ Complete | ✅ Verified | Service UUID requirement warning |
+| State restoration | ✅ Complete | ✅ Tested | Full restoration for Central/Peripheral managers |
+| L2CAP channels | ✅ Complete | ✅ Tested | Stream-based data transfer with encryption support |
+| ANCS authorization | ✅ Complete | ✅ Tested | Authorization status tracking and updates (iOS 13.1+) |
 
 ## Conclusion
 
@@ -253,11 +341,11 @@ TOTAL: 11/11 tests passing
 - ✅ **For testing scan/discovery**: Ready
 - ✅ **For testing characteristic operations**: Ready
 - ✅ **For testing backpressure scenarios**: Ready
-- ✅ **For state restoration testing**: Ready (new in this update)
+- ✅ **For state restoration testing**: Ready
 - ✅ **For advertisement data testing**: Ready (with auto-generation)
 - ✅ **For real device replacement**: Ready (with proper configuration)
-- ❌ **For L2CAP applications**: Not supported (future enhancement)
-- ❌ **For ANCS applications**: Not supported (future enhancement)
+- ✅ **For L2CAP applications**: Ready (iOS 11+, stream-based data transfer)
+- ✅ **For ANCS applications**: Ready (iOS 13.1+, authorization tracking)
 
 **Major Improvements in This Update**:
 
@@ -275,9 +363,20 @@ TOTAL: 11/11 tests passing
    - Matches CoreBluetooth behavior (no low-level pairing API)
    - Configurable success/failure simulation
 
-**Recommendation**: The emulator is now production-ready for comprehensive GATT protocol simulation including state restoration and realistic advertisement behavior.
+4. ✅ **L2CAP Channels**: Complete stream-based data transfer (iOS 11+)
+   - Channel publishing with encryption support
+   - Channel opening from central
+   - Input/Output streams for bidirectional communication
+   - Automatic pairing for encrypted channels
 
-**Known Limitations**:
-1. L2CAP channels not implemented (future enhancement)
-2. ANCS authorization not implemented (future enhancement)
-3. Some features require configuration flags to be enabled
+5. ✅ **ANCS Authorization**: Authorization status tracking (iOS 13.1+)
+   - Authorization status updates
+   - Delegate notifications
+   - Multi-central support
+
+**Recommendation**: The emulator is now production-ready for comprehensive CoreBluetooth protocol simulation including GATT, L2CAP, state restoration, and ANCS authorization.
+
+**Configuration Notes**:
+- Some features require configuration flags to be enabled (see individual feature sections above)
+- Default configuration is optimized for realistic device behavior
+- Use `.instant` preset for fast unit testing

@@ -23,6 +23,9 @@ public actor EmulatorBus {
     private var connectionEventRegistrations: [UUID: [CBConnectionEventMatchingOption: Any]] = [:]  // central -> options
     private var pairedConnections: Set<ConnectionPair> = []  // paired central-peripheral pairs
     private var restorationData: [String: Data] = [:]  // restore identifier -> encoded state
+    private var publishedL2CAPChannels: [UUID: [CBL2CAPPSM: Bool]] = [:]  // peripheral -> PSM -> encryption required
+    private var openL2CAPChannels: [UUID: EmulatedCBL2CAPChannel] = [:]  // channel identifier -> channel
+    private var ancsAuthorizationStatus: [UUID: CBPeripheralManagerAuthorizationStatus] = [:]  // central -> status
 
     private struct ConnectionPair: Hashable {
         let centralIdentifier: UUID
@@ -117,6 +120,13 @@ public actor EmulatorBus {
     // MARK: - Scanning
 
     public func startScanning(centralIdentifier: UUID, services: [CBUUID]?, options: [String: Any]?) {
+        // In background mode, scanning without service UUIDs is not allowed
+        if configuration.backgroundModeEnabled && (services == nil || services?.isEmpty == true) {
+            // In real CoreBluetooth, this would log a warning and not start scanning
+            // For the emulator, we'll allow it but log a note
+            print("Warning: Scanning in background mode without service UUIDs is not recommended")
+        }
+
         scanningCentrals.insert(centralIdentifier)
 
         // Update central registration with scan parameters
@@ -975,6 +985,112 @@ public actor EmulatorBus {
         )
     }
 
+    // MARK: - L2CAP Channels
+
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    public func publishL2CAPChannel(
+        peripheralIdentifier: UUID,
+        encryptionRequired: Bool
+    ) async throws -> CBL2CAPPSM {
+        guard configuration.l2capSupported else {
+            throw CBError(.connectionFailed)
+        }
+
+        // Generate a PSM in the valid range
+        let psm = CBL2CAPPSM(configuration.l2capPSMRange.lowerBound + UInt16.random(in: 0..<100))
+
+        var channels = publishedL2CAPChannels[peripheralIdentifier] ?? [:]
+        channels[psm] = encryptionRequired
+        publishedL2CAPChannels[peripheralIdentifier] = channels
+
+        return psm
+    }
+
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    public func unpublishL2CAPChannel(
+        peripheralIdentifier: UUID,
+        psm: CBL2CAPPSM
+    ) {
+        publishedL2CAPChannels[peripheralIdentifier]?.removeValue(forKey: psm)
+    }
+
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    public func openL2CAPChannel(
+        centralIdentifier: UUID,
+        peripheralIdentifier: UUID,
+        psm: CBL2CAPPSM
+    ) async throws -> EmulatedCBL2CAPChannel {
+        guard configuration.l2capSupported else {
+            throw CBError(.connectionFailed)
+        }
+
+        // Check if channel is published
+        guard let channels = publishedL2CAPChannels[peripheralIdentifier],
+              let encryptionRequired = channels[psm] else {
+            throw CBError(.unknownDevice)
+        }
+
+        // Check if connected
+        guard isConnected(centralIdentifier: centralIdentifier, peripheralIdentifier: peripheralIdentifier) else {
+            throw CBError(.notConnected)
+        }
+
+        // Check pairing if encryption required
+        if encryptionRequired {
+            if !isPaired(centralIdentifier: centralIdentifier, peripheralIdentifier: peripheralIdentifier) {
+                try await pair(centralIdentifier: centralIdentifier, peripheralIdentifier: peripheralIdentifier)
+            }
+        }
+
+        // Create channel - peer will be the peripheral
+        guard let peripheralManager = peripherals[peripheralIdentifier]?.manager else {
+            throw CBError(.unknownDevice)
+        }
+
+        let central = EmulatedCBCentral(identifier: centralIdentifier)
+        let channel = EmulatedCBL2CAPChannel(peer: central, psm: psm)
+        channel.open()
+
+        openL2CAPChannels[channel.identifier] = channel
+
+        // Notify peripheral manager
+        await peripheralManager.notifyL2CAPChannelOpened(channel)
+
+        return channel
+    }
+
+    @available(iOS 11.0, macOS 10.13, tvOS 11.0, watchOS 4.0, *)
+    public func closeL2CAPChannel(channelIdentifier: UUID) {
+        if let channel = openL2CAPChannels[channelIdentifier] {
+            channel.close()
+            openL2CAPChannels.removeValue(forKey: channelIdentifier)
+        }
+    }
+
+    // MARK: - ANCS Authorization
+
+    public func updateANCSAuthorization(
+        for centralIdentifier: UUID,
+        status: CBPeripheralManagerAuthorizationStatus
+    ) async {
+        guard configuration.fireANCSAuthorizationUpdates else { return }
+
+        ancsAuthorizationStatus[centralIdentifier] = status
+
+        // Notify all peripheral managers
+        for peripheralReg in peripherals.values {
+            if let manager = peripheralReg.manager {
+                await manager.notifyANCSAuthorizationUpdate(for: centralIdentifier)
+            }
+        }
+    }
+
+    public func getANCSAuthorization(for centralIdentifier: UUID) -> CBPeripheralManagerAuthorizationStatus {
+        return ancsAuthorizationStatus[centralIdentifier] ?? .notDetermined
+    }
+
+    // MARK: - Reset
+
     public func reset() {
         // Cancel all scan tasks
         for task in scanTasks.values {
@@ -990,6 +1106,9 @@ public actor EmulatorBus {
         connectionMTUs.removeAll()
         writeWithoutResponseQueues.removeAll()
         notificationQueues.removeAll()
+        publishedL2CAPChannels.removeAll()
+        openL2CAPChannels.removeAll()
+        ancsAuthorizationStatus.removeAll()
         configuration = .default
     }
 }

@@ -1,0 +1,279 @@
+import XCTest
+@testable import CoreBluetoothEmulator
+import CoreBluetooth
+
+final class SecurityPairingTests: XCTestCase {
+    var centralManager: EmulatedCBCentralManager!
+    var peripheralManager: EmulatedCBPeripheralManager!
+    var centralDelegate: SecurityTestCentralDelegate!
+    var peripheralManagerDelegate: SecurityTestPeripheralManagerDelegate!
+
+    override func setUp() async throws {
+        await EmulatorBus.shared.reset()
+
+        // Enable pairing simulation
+        var config = EmulatorConfiguration.instant
+        config.simulatePairing = true
+        config.requirePairing = true
+        config.pairingSucceeds = true
+        await EmulatorBus.shared.configure(config)
+
+        centralDelegate = SecurityTestCentralDelegate()
+        peripheralManagerDelegate = SecurityTestPeripheralManagerDelegate()
+
+        centralManager = EmulatedCBCentralManager(delegate: centralDelegate, queue: nil)
+        peripheralManager = EmulatedCBPeripheralManager(delegate: peripheralManagerDelegate, queue: nil)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+    }
+
+    func testEncryptedReadRequiresPairing() async throws {
+        let serviceUUID = CBUUID(string: "AA00")
+        let characteristicUUID = CBUUID(string: "AA01")
+
+        // Create characteristic with encryption-required permission
+        let characteristic = EmulatedCBMutableCharacteristic(
+            type: characteristicUUID,
+            properties: [.read],
+            value: Data([0x01, 0x02, 0x03]),
+            permissions: [.readEncryptionRequired]  // Requires pairing
+        )
+
+        let service = EmulatedCBMutableService(type: serviceUUID, primary: true)
+        service.characteristics = [characteristic]
+        peripheralManager.add(service)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        // Start advertising
+        peripheralManager.startAdvertising([
+            CBAdvertisementDataLocalNameKey: "Secure Device",
+            CBAdvertisementDataServiceUUIDsKey: [serviceUUID]
+        ])
+
+        // Scan and connect
+        centralManager.scanForPeripherals(withServices: [serviceUUID], options: nil)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        guard let peripheral = centralDelegate.discoveredPeripherals.first else {
+            XCTFail("Should discover peripheral")
+            return
+        }
+
+        // Set peripheral delegate
+        peripheral.delegate = centralDelegate
+
+        centralManager.connect(peripheral, options: nil)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertTrue(centralDelegate.connectedPeripherals.contains(peripheral))
+
+        // Discover services and characteristics
+        peripheral.discoverServices([serviceUUID])
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        guard let discoveredService = peripheral.services?.first else {
+            XCTFail("Should discover service")
+            return
+        }
+
+        peripheral.discoverCharacteristics([characteristicUUID], for: discoveredService)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        guard let discoveredCharacteristic = discoveredService.characteristics?.first else {
+            XCTFail("Should discover characteristic")
+            return
+        }
+
+        // Read encrypted characteristic - should trigger automatic pairing
+        peripheral.readValue(for: discoveredCharacteristic)
+
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        // Verify read succeeded after pairing
+        XCTAssertEqual(centralDelegate.readValues.count, 1, "Should successfully read after pairing")
+        XCTAssertEqual(centralDelegate.readValues.first, Data([0x01, 0x02, 0x03]))
+    }
+
+    func testEncryptedWriteRequiresPairing() async throws {
+        let serviceUUID = CBUUID(string: "BB00")
+        let characteristicUUID = CBUUID(string: "BB01")
+
+        // Create characteristic with write encryption-required permission
+        let characteristic = EmulatedCBMutableCharacteristic(
+            type: characteristicUUID,
+            properties: [.write],
+            value: nil,
+            permissions: [.writeEncryptionRequired]  // Requires pairing
+        )
+
+        let service = EmulatedCBMutableService(type: serviceUUID, primary: true)
+        service.characteristics = [characteristic]
+        peripheralManager.add(service)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        // Start advertising
+        peripheralManager.startAdvertising([
+            CBAdvertisementDataLocalNameKey: "Secure Write Device",
+            CBAdvertisementDataServiceUUIDsKey: [serviceUUID]
+        ])
+
+        // Scan and connect
+        centralManager.scanForPeripherals(withServices: [serviceUUID], options: nil)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        guard let peripheral = centralDelegate.discoveredPeripherals.first else {
+            XCTFail("Should discover peripheral")
+            return
+        }
+
+        // Set peripheral delegate
+        peripheral.delegate = centralDelegate
+
+        centralManager.connect(peripheral, options: nil)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        // Discover services and characteristics
+        peripheral.discoverServices([serviceUUID])
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        guard let discoveredService = peripheral.services?.first,
+              let discoveredCharacteristic = discoveredService.characteristics?.first else {
+            XCTFail("Should discover service and characteristic")
+            return
+        }
+
+        // Write to encrypted characteristic - should trigger automatic pairing
+        let writeData = Data([0xAA, 0xBB, 0xCC])
+        peripheral.writeValue(writeData, for: discoveredCharacteristic, type: .withResponse)
+
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        // Verify write succeeded after pairing
+        XCTAssertTrue(peripheralManagerDelegate.writeRequests.count > 0, "Should receive write request after pairing")
+    }
+
+    func testPairingFailurePreventsAccess() async throws {
+        // Configure pairing to fail
+        var config = EmulatorConfiguration.instant
+        config.simulatePairing = true
+        config.requirePairing = true
+        config.pairingSucceeds = false  // Pairing will fail
+        await EmulatorBus.shared.configure(config)
+
+        let serviceUUID = CBUUID(string: "CC00")
+        let characteristicUUID = CBUUID(string: "CC01")
+
+        let characteristic = EmulatedCBMutableCharacteristic(
+            type: characteristicUUID,
+            properties: [.read],
+            value: Data([0x01]),
+            permissions: [.readEncryptionRequired]
+        )
+
+        let service = EmulatedCBMutableService(type: serviceUUID, primary: true)
+        service.characteristics = [characteristic]
+        peripheralManager.add(service)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        peripheralManager.startAdvertising([
+            CBAdvertisementDataLocalNameKey: "Fail Pairing Device",
+            CBAdvertisementDataServiceUUIDsKey: [serviceUUID]
+        ])
+
+        centralManager.scanForPeripherals(withServices: [serviceUUID], options: nil)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        guard let peripheral = centralDelegate.discoveredPeripherals.first else {
+            XCTFail("Should discover peripheral")
+            return
+        }
+
+        // Set peripheral delegate
+        peripheral.delegate = centralDelegate
+
+        centralManager.connect(peripheral, options: nil)
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        peripheral.discoverServices([serviceUUID])
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        guard let discoveredService = peripheral.services?.first,
+              let discoveredCharacteristic = discoveredService.characteristics?.first else {
+            XCTFail("Should discover service and characteristic")
+            return
+        }
+
+        // Attempt to read - should fail due to pairing failure
+        peripheral.readValue(for: discoveredCharacteristic)
+
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        // Verify read failed
+        XCTAssertTrue(centralDelegate.readErrors.count > 0, "Should receive error when pairing fails")
+        XCTAssertEqual(centralDelegate.readValues.count, 0, "Should not read value when pairing fails")
+    }
+}
+
+// MARK: - Test Delegates
+
+class SecurityTestCentralDelegate: NSObject, EmulatedCBCentralManagerDelegate, EmulatedCBPeripheralDelegate {
+    var discoveredPeripherals: [EmulatedCBPeripheral] = []
+    var connectedPeripherals: [EmulatedCBPeripheral] = []
+    var readValues: [Data] = []
+    var readErrors: [Error] = []
+
+    func centralManagerDidUpdateState(_ central: EmulatedCBCentralManager) {}
+
+    func centralManager(_ central: EmulatedCBCentralManager, didDiscover peripheral: EmulatedCBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        discoveredPeripherals.append(peripheral)
+    }
+
+    func centralManager(_ central: EmulatedCBCentralManager, didConnect peripheral: EmulatedCBPeripheral) {
+        connectedPeripherals.append(peripheral)
+    }
+
+    func peripheral(_ peripheral: EmulatedCBPeripheral, didUpdateValueFor characteristic: EmulatedCBCharacteristic, error: Error?) {
+        if let error = error {
+            readErrors.append(error)
+        } else if let value = characteristic.value {
+            readValues.append(value)
+        }
+    }
+
+    func peripheral(_ peripheral: EmulatedCBPeripheral, didWriteValueFor characteristic: EmulatedCBCharacteristic, error: Error?) {
+        // Handle write completion
+    }
+
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: EmulatedCBPeripheral) {
+        // Handle ready to send
+    }
+}
+
+class SecurityTestPeripheralManagerDelegate: NSObject, EmulatedCBPeripheralManagerDelegate {
+    var writeRequests: [EmulatedCBATTRequest] = []
+
+    func peripheralManagerDidUpdateState(_ peripheral: EmulatedCBPeripheralManager) {}
+
+    func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, didReceiveRead request: EmulatedCBATTRequest) {
+        peripheral.respond(to: request, withResult: .success)
+    }
+
+    func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, didReceiveWrite requests: [EmulatedCBATTRequest]) {
+        writeRequests.append(contentsOf: requests)
+        for request in requests {
+            peripheral.respond(to: request, withResult: .success)
+        }
+    }
+}

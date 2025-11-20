@@ -105,7 +105,7 @@ await EmulatorBus.shared.configure(.instant)  // For tests
 
 ## Implementation Status Reference
 
-### ✅ Production Ready (All 11 integration tests passing)
+### ✅ Production Ready (All 32 integration tests passing)
 - Central Manager: Scanning, connecting, service/characteristic/descriptor discovery
 - Peripheral Manager: Advertising, service hosting, read/write handling
 - GATT Operations: Read, write, notify/indicate
@@ -122,22 +122,25 @@ await EmulatorBus.shared.configure(.instant)  // For tests
 - Service Filtering: Proper UUID-based filtering
 - Subscription Management: Per-characteristic subscriber tracking with cleanup on disconnect
 - State Restoration: Full restoration for Central and Peripheral managers (requires `stateRestorationEnabled = true`)
-- Security/Pairing: Auto-pairing simulation (matches CoreBluetooth behavior)
+- Security/Pairing: Auto-pairing simulation with encryption-required enforcement
+- Background Mode: Service UUID requirement for background scanning
+- L2CAP Channels (iOS 11+): Stream-based data transfer with encryption support (requires `l2capSupported = true`)
+- ANCS Authorization (iOS 13.1+): Authorization status tracking and updates (requires `fireANCSAuthorizationUpdates = true`)
 
 **Configuration Flags Required**:
 - Scan options work by default (`honorAllowDuplicatesOption = true` by default)
 - Connection events require `fireConnectionEvents = true`
 - Backpressure requires `simulateBackpressure = true`
 - State restoration requires `stateRestorationEnabled = true`
+- L2CAP channels require `l2capSupported = true`
+- ANCS authorization requires `fireANCSAuthorizationUpdates = true`
 - Advertisement auto-generation enabled by default (`autoGenerateAdvertisementFields = true`)
 - See `README.md` Configuration Requirements section for full details
 
 ### ⏳ Future Enhancements
-- L2CAP Channels: Configuration exists, full channel logic not implemented
-- ANCS Authorization: Configuration flag only, no implementation
-- Advanced Latency: setDesiredConnectionLatency method exists but does nothing
+- Advanced Latency: setDesiredConnectionLatency method exists but does nothing (low priority)
 
-**IMPORTANT**: See `IMPLEMENTATION_STATUS.md` for detailed analysis of what's implemented vs user expectations.
+**IMPORTANT**: See `IMPLEMENTATION_STATUS.md` for detailed analysis of implementation completeness.
 
 ## Important Implementation Notes
 
@@ -227,6 +230,9 @@ centralManager.scanForPeripherals(withServices: serviceUUIDs, options: options)
 - `Sources/CoreBluetoothEmulator/Internal/EmulatedCBService.swift`: Service classes (read-only and mutable)
 - `Sources/CoreBluetoothEmulator/Internal/EmulatedCBCharacteristic.swift`: Characteristic classes
 - `Sources/CoreBluetoothEmulator/Internal/EmulatedCBDescriptor.swift`: Descriptor classes
+
+**L2CAP:**
+- `Sources/CoreBluetoothEmulator/Internal/EmulatedCBL2CAPChannel.swift`: L2CAP channel with input/output streams
 
 **Protocols:**
 - `Sources/CoreBluetoothEmulator/EmulatedDelegates.swift`: All emulated delegate protocols with default implementations

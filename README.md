@@ -26,11 +26,14 @@ CoreBluetoothEmulator is a pure-Swift implementation that emulates the full Core
 - **Scan Options**: Full support for CBCentralManagerScanOption
   - AllowDuplicatesKey: Honors duplicate advertisement delivery (requires `honorAllowDuplicatesOption = true`)
   - SolicitedServiceUUIDsKey: Filters by solicited services (requires `honorSolicitedServiceUUIDs = true`)
-- **Advertisement Payload**: Complete passthrough support for all standard advertisement keys
-  - LocalName, ServiceUUIDs, SolicitedServiceUUIDs, OverflowServiceUUIDs
-  - ManufacturerData, ServiceData
-  - TxPowerLevel, IsConnectable
-  - Note: Unlike real CoreBluetooth, the emulator passes through all fields as-is without auto-generation
+- **Advertisement Payload**: Complete passthrough support with auto-generation
+  - All standard keys: LocalName, ServiceUUIDs, SolicitedServiceUUIDs, OverflowServiceUUIDs, ManufacturerData, ServiceData
+  - Auto-generation: TxPowerLevel (-12 to -4 dBm), IsConnectable (default: true)
+  - Controlled by `autoGenerateAdvertisementFields` (default: true)
+- **State Restoration**: Full state preservation across app termination
+  - Central Manager: Restores connected peripherals and scan state
+  - Peripheral Manager: Restores advertisement data and services
+  - Requires `stateRestorationEnabled = true` in configuration
 - **Bidirectional Events**: Disconnect notifications to both central and peripheral
   - Auto-unsubscribe on disconnect
   - Proper cleanup of subscriptions
@@ -42,6 +45,16 @@ CoreBluetoothEmulator is a pure-Swift implementation that emulates the full Core
   - Write Without Response queue management (requires `simulateBackpressure = true`)
   - Notification queue management (requires `simulateBackpressure = true`)
   - peripheralIsReady and peripheralManagerIsReady callbacks
+- **L2CAP Channels** (iOS 11+): Stream-based data transfer
+  - Channel publishing with PSM assignment
+  - Encryption support with automatic pairing
+  - Input/Output streams for bidirectional communication
+  - Requires `l2capSupported = true` in configuration
+- **ANCS Authorization** (iOS 13.1+): Authorization status tracking
+  - Authorization update notifications
+  - Multi-central support
+  - Requires `fireANCSAuthorizationUpdates = true` in configuration
+- **Security/Pairing**: Auto-pairing simulation with encryption enforcement
 - **Permission Control**: Read/write permissions for characteristics and descriptors
 - **Connection Validation**: Operations fail correctly when not connected
 - **Service Filtering**: Proper filtering by service UUIDs
@@ -51,23 +64,17 @@ CoreBluetoothEmulator is a pure-Swift implementation that emulates the full Core
 - **Timing Control**: Configurable delays for all operations
 - **RSSI Simulation**: Realistic signal strength with variation
 - **Error Simulation**: Connection failures, read/write errors
-- **MTU Settings**: Default and maximum MTU configuration (implemented)
-- **Backpressure**: Queue limits for Write Without Response and notifications (implemented)
-- **Scan Behavior**: Honor real CoreBluetooth scan options (implemented)
-- **Security**: Pairing and encryption simulation settings (configuration ready)
-- **Background Mode**: State preservation settings (configuration ready)
-
-### 🔄 Partial Implementation
-
-- **Security/Pairing**: Configuration ready, pairing process implementation pending
-- **State Restoration**: Infrastructure ready, save/restore implementation pending
+- **MTU Settings**: Default and maximum MTU configuration
+- **Backpressure**: Queue limits for Write Without Response and notifications
+- **Scan Behavior**: Honor real CoreBluetooth scan options
+- **Security**: Pairing and encryption simulation settings
+- **State Restoration**: Full save/restore functionality
+- **L2CAP Support**: Stream-based channel communication
+- **ANCS**: Authorization status tracking
 
 ### ⏳ Future Enhancements
 
-- **L2CAP Channels**: Configuration and delegate methods exist, implementation pending
-- **ANCS Authorization**: Authorization update events
-- **Advanced Latency**: setDesiredConnectionLatency implementation
-- **Complete State Restoration**: Infrastructure exists, actual save/restore implementation pending
+- **Advanced Latency**: setDesiredConnectionLatency implementation (low priority)
 
 ## Installation
 
@@ -490,18 +497,22 @@ Some features require specific configuration flags to be enabled. This table sho
 |---------|-------------------|---------------|-------|
 | **AllowDuplicatesKey** | `honorAllowDuplicatesOption` | `true` | Controls duplicate advertisement delivery |
 | **SolicitedServiceUUIDs** | `honorSolicitedServiceUUIDs` | `true` | Filters peripherals by solicited services |
+| **Advertisement Auto-Gen** | `autoGenerateAdvertisementFields` | `true` | Auto-generates TxPowerLevel and IsConnectable |
 | **Connection Events** | `fireConnectionEvents` | `false` | Must also call `registerForConnectionEvents()` |
 | **Backpressure Simulation** | `simulateBackpressure` | `false` | Enables queue management for writes/notifications |
 | **Connection Failures** | `simulateConnectionFailure` | `false` | Randomly fails connections based on rate |
 | **Read/Write Errors** | `simulateReadWriteErrors` | `false` | Randomly fails operations based on rate |
 | **Pairing** | `simulatePairing` | `false` | Simulates pairing process with delay |
-| **State Restoration** | `stateRestorationEnabled` | `false` | Enables state save/restore (partial) |
+| **State Restoration** | `stateRestorationEnabled` | `false` | Enables full state save/restore |
+| **L2CAP Channels** | `l2capSupported` | `false` | Enables stream-based L2CAP channels (iOS 11+) |
+| **ANCS Authorization** | `fireANCSAuthorizationUpdates` | `false` | Enables ANCS authorization updates (iOS 13.1+) |
 
 **Important Notes**:
 - Most features work without configuration changes using sensible defaults
 - Scan options (AllowDuplicates, SolicitedServices) are enabled by default
-- Advertisement data passthrough works automatically - no configuration needed
-- Connection events and backpressure require explicit enablement for realistic simulation
+- Advertisement data passthrough works automatically with optional auto-generation
+- Connection events, backpressure, L2CAP, and ANCS require explicit enablement
+- State restoration is fully implemented and requires configuration to enable
 
 ## Advanced Usage
 
@@ -598,6 +609,114 @@ func peripheralIsReady(toSendWriteWithoutResponse peripheral: EmulatedCBPeripher
 func peripheralManagerIsReady(toUpdateSubscribers peripheral: EmulatedCBPeripheralManager) {
     // Queue has space, can send more notifications
     let success = peripheral.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
+}
+```
+
+### L2CAP Channels (iOS 11+)
+
+```swift
+// Enable L2CAP support
+var config = EmulatorConfiguration.default
+config.l2capSupported = true
+await EmulatorBus.shared.configure(config)
+
+// Peripheral: Publish L2CAP channel
+peripheralManager.publishL2CAPChannel(withEncryption: false)
+
+// Implement delegate to receive PSM
+func peripheralManager(
+    _ peripheral: EmulatedCBPeripheralManager,
+    didPublishL2CAPChannel PSM: CBL2CAPPSM,
+    error: Error?
+) {
+    if let error = error {
+        print("Failed to publish L2CAP channel: \(error)")
+    } else {
+        print("Published L2CAP channel with PSM: \(PSM)")
+    }
+}
+
+// Central: Open L2CAP channel after connection
+peripheral.openL2CAPChannel(psm)
+
+// Implement delegate to receive channel
+@available(iOS 11.0, *)
+func peripheral(
+    _ peripheral: EmulatedCBPeripheral,
+    didOpen channel: EmulatedCBL2CAPChannel?,
+    error: Error?
+) {
+    guard let channel = channel else {
+        print("Failed to open L2CAP channel: \(error?.localizedDescription ?? "unknown")")
+        return
+    }
+
+    // Use input/output streams for data transfer
+    channel.inputStream?.open()
+    channel.outputStream?.open()
+
+    // Write data
+    let data = Data([0x01, 0x02, 0x03])
+    _ = channel.send(data: data)
+
+    // Read data
+    if let receivedData = channel.receive(maxLength: 1024) {
+        print("Received: \(receivedData)")
+    }
+}
+```
+
+### State Restoration
+
+```swift
+// Enable state restoration
+var config = EmulatorConfiguration.default
+config.stateRestorationEnabled = true
+await EmulatorBus.shared.configure(config)
+
+// Central Manager with restoration
+let options = [CBCentralManagerOptionRestoreIdentifierKey: "myCentralManager"]
+let centralManager = EmulatedCBCentralManager(delegate: self, queue: nil, options: options)
+
+// Peripheral Manager with restoration
+let options = [CBPeripheralManagerOptionRestoreIdentifierKey: "myPeripheralManager"]
+let peripheralManager = EmulatedCBPeripheralManager(delegate: self, queue: nil, options: options)
+
+// Implement restoration delegate
+func centralManager(_ central: EmulatedCBCentralManager, willRestoreState dict: [String : Any]) {
+    if let peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [EmulatedCBPeripheral] {
+        print("Restored \(peripherals.count) peripherals")
+    }
+    if let scanServices = dict[CBCentralManagerRestoredStateScanServicesKey] as? [CBUUID] {
+        print("Restored scan services: \(scanServices)")
+    }
+}
+```
+
+### ANCS Authorization (iOS 13.1+)
+
+```swift
+// Enable ANCS authorization updates
+var config = EmulatorConfiguration.default
+config.fireANCSAuthorizationUpdates = true
+await EmulatorBus.shared.configure(config)
+
+// Update ANCS authorization status
+await EmulatorBus.shared.updateANCSAuthorization(
+    for: centralIdentifier,
+    status: .authorized
+)
+
+// Peripheral manager receives notification
+@available(iOS 13.1, *)
+func peripheralManager(
+    _ peripheral: EmulatedCBPeripheralManager,
+    didUpdateANCSAuthorizationFor central: EmulatedCBCentral
+) {
+    Task {
+        let status = await EmulatorBus.shared.getANCSAuthorization(for: central.identifier)
+        print("ANCS authorization for central \(central.identifier): \(status)")
+    }
 }
 ```
 
