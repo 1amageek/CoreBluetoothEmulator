@@ -112,7 +112,7 @@ await EmulatorBus.shared.configure(.instant)  // For tests
 - Connection Management: Connect, disconnect, state tracking
 - Notifications: Subscription management with isNotifying state
 - Scan Options: AllowDuplicatesKey (requires config), SolicitedServiceUUIDs (requires config)
-- Advertisement Payload: Passthrough for all standard keys (LocalName, ServiceUUIDs, ManufacturerData, TxPower, IsConnectable, etc.)
+- Advertisement Payload: Passthrough for all standard keys + auto-generation of TxPowerLevel and IsConnectable
 - Bidirectional Events: Disconnect notifications to both sides, auto-unsubscribe
 - Connection Events (iOS 13+): CBConnectionEvent support for peer connect/disconnect (requires `fireConnectionEvents = true`)
 - MTU Management: Per-connection dynamic tracking (default 185, max 512)
@@ -121,19 +121,19 @@ await EmulatorBus.shared.configure(.instant)  // For tests
 - Connection Validation: Operations fail correctly when disconnected
 - Service Filtering: Proper UUID-based filtering
 - Subscription Management: Per-characteristic subscriber tracking with cleanup on disconnect
+- State Restoration: Full restoration for Central and Peripheral managers (requires `stateRestorationEnabled = true`)
+- Security/Pairing: Auto-pairing simulation (matches CoreBluetooth behavior)
 
 **Configuration Flags Required**:
 - Scan options work by default (`honorAllowDuplicatesOption = true` by default)
 - Connection events require `fireConnectionEvents = true`
 - Backpressure requires `simulateBackpressure = true`
+- State restoration requires `stateRestorationEnabled = true`
+- Advertisement auto-generation enabled by default (`autoGenerateAdvertisementFields = true`)
 - See `README.md` Configuration Requirements section for full details
 
-### 🔄 Partial Implementation
-- Security/Pairing: Auto-pairing implemented, user interaction simulation pending
-- State Restoration: Infrastructure complete, actual restoration logic marked with TODO
-
 ### ⏳ Future Enhancements
-- L2CAP Channels: Configuration and delegates exist, channel logic not implemented
+- L2CAP Channels: Configuration exists, full channel logic not implemented
 - ANCS Authorization: Configuration flag only, no implementation
 - Advanced Latency: setDesiredConnectionLatency method exists but does nothing
 

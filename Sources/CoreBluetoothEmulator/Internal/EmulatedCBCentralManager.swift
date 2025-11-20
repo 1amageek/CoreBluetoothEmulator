@@ -39,11 +39,62 @@ public class EmulatedCBCentralManager: NSObject, @unchecked Sendable {
             await EmulatorBus.shared.register(central: self, identifier: identifier)
 
             // Call state restoration delegate method if restore identifier was provided
-            if restoreIdentifier != nil, delegate != nil {
-                // TODO: Implement actual state restoration
-                // For now, just notify delegate with empty dict
-                notifyDelegate { delegate in
-                    delegate.centralManager(self, willRestoreState: [:])
+            if let restoreId = restoreIdentifier, delegate != nil {
+                do {
+                    // Try to restore state from EmulatorBus
+                    if let restoredState = try await EmulatorBus.shared.restoreState(
+                        identifier: restoreId,
+                        as: EmulatorBus.RestoredCentralState.self
+                    ) {
+                        // Build restoration dictionary
+                        var restorationDict: [String: Any] = [:]
+
+                        // Restore connected peripherals
+                        if !restoredState.connectedPeripheralIdentifiers.isEmpty {
+                            var peripherals: [EmulatedCBPeripheral] = []
+                            for peripheralId in restoredState.connectedPeripheralIdentifiers {
+                                // Get peripheral manager to create peripheral proxy
+                                if let peripheral = await EmulatorBus.shared.getPeripheralProxy(
+                                    peripheralIdentifier: peripheralId,
+                                    centralIdentifier: identifier
+                                ) {
+                                    // Restore connection state
+                                    peripheral.setState(.connected)
+
+                                    // Store in discovered peripherals
+                                    discoveredPeripherals[peripheralId] = peripheral
+                                    peripherals.append(peripheral)
+                                }
+                            }
+                            if !peripherals.isEmpty {
+                                restorationDict[CBCentralManagerRestoredStatePeripheralsKey] = peripherals
+                            }
+                        }
+
+                        // Restore scan services if any
+                        if let scanServicesData = restoredState.scanServices {
+                            let scanServices = scanServicesData.compactMap { CBUUID(data: $0) }
+                            if !scanServices.isEmpty {
+                                restorationDict[CBCentralManagerRestoredStateScanServicesKey] = scanServices
+                            }
+                        }
+
+                        // Notify delegate with restored state
+                        nonisolated(unsafe) let restoreDict = restorationDict
+                        notifyDelegate { delegate in
+                            delegate.centralManager(self, willRestoreState: restoreDict)
+                        }
+                    } else {
+                        // No saved state, notify with empty dict
+                        notifyDelegate { delegate in
+                            delegate.centralManager(self, willRestoreState: [:])
+                        }
+                    }
+                } catch {
+                    // Error restoring state, notify with empty dict
+                    notifyDelegate { delegate in
+                        delegate.centralManager(self, willRestoreState: [:])
+                    }
                 }
             }
 

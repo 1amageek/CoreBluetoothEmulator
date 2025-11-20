@@ -240,7 +240,26 @@ public actor EmulatorBus {
     public func startAdvertising(peripheralIdentifier: UUID, data: [String: Any]) {
         advertisingPeripherals.insert(peripheralIdentifier)
         if var registration = peripherals[peripheralIdentifier] {
-            registration.advertisementData = data
+            // Start with the provided advertisement data
+            var enhancedData = data
+
+            // Auto-generate IsConnectable if not provided and configuration allows
+            if configuration.autoGenerateAdvertisementFields {
+                if enhancedData[CBAdvertisementDataIsConnectable] == nil {
+                    // Default to true (connectable) unless explicitly set
+                    enhancedData[CBAdvertisementDataIsConnectable] = NSNumber(value: true)
+                }
+
+                // Auto-generate TxPowerLevel if not provided
+                if enhancedData[CBAdvertisementDataTxPowerLevelKey] == nil {
+                    // Generate a realistic Tx power level between -20 and 0 dBm
+                    // Most BLE devices transmit between -12 and -4 dBm
+                    let txPower = Int.random(in: -12...(-4))
+                    enhancedData[CBAdvertisementDataTxPowerLevelKey] = NSNumber(value: txPower)
+                }
+            }
+
+            registration.advertisementData = enhancedData
             peripherals[peripheralIdentifier] = registration
         }
     }
@@ -937,6 +956,23 @@ public actor EmulatorBus {
 
     public func getConnectedPeripherals(for centralIdentifier: UUID) -> [UUID] {
         Array(connections[centralIdentifier] ?? [])
+    }
+
+    public func getPeripheralProxy(
+        peripheralIdentifier: UUID,
+        centralIdentifier: UUID
+    ) async -> EmulatedCBPeripheral? {
+        guard let peripheralReg = peripherals[peripheralIdentifier],
+              let peripheralManager = peripheralReg.manager,
+              let centralReg = centrals[centralIdentifier] else {
+            return nil
+        }
+
+        // Create peripheral proxy with stored advertisement data
+        return await peripheralManager.createPeripheralProxy(
+            for: centralReg.manager!,
+            advertisementData: peripheralReg.advertisementData
+        )
     }
 
     public func reset() {

@@ -126,6 +126,11 @@ public struct EmulatorConfiguration: Sendable {
     /// Whether to fire ANCS authorization updates
     public var fireANCSAuthorizationUpdates: Bool
 
+    // MARK: - Advertisement Settings
+
+    /// Whether to auto-generate system advertisement fields (TxPowerLevel, IsConnectable)
+    public var autoGenerateAdvertisementFields: Bool
+
     // MARK: - Presets
 
     /// Default configuration with realistic timing
@@ -164,7 +169,8 @@ public struct EmulatorConfiguration: Sendable {
             l2capSupported: false,
             l2capPSMRange: 0x0080...0x00FF,
             fireConnectionEvents: false,
-            fireANCSAuthorizationUpdates: false
+            fireANCSAuthorizationUpdates: false,
+            autoGenerateAdvertisementFields: true
         )
     }
 
@@ -204,7 +210,8 @@ public struct EmulatorConfiguration: Sendable {
             l2capSupported: false,
             l2capPSMRange: 0x0080...0x00FF,
             fireConnectionEvents: false,
-            fireANCSAuthorizationUpdates: false
+            fireANCSAuthorizationUpdates: false,
+            autoGenerateAdvertisementFields: true
         )
     }
 
@@ -244,7 +251,8 @@ public struct EmulatorConfiguration: Sendable {
             l2capSupported: false,
             l2capPSMRange: 0x0080...0x00FF,
             fireConnectionEvents: false,
-            fireANCSAuthorizationUpdates: false
+            fireANCSAuthorizationUpdates: false,
+            autoGenerateAdvertisementFields: true
         )
     }
 
@@ -284,7 +292,8 @@ public struct EmulatorConfiguration: Sendable {
             l2capSupported: false,
             l2capPSMRange: 0x0080...0x00FF,
             fireConnectionEvents: false,
-            fireANCSAuthorizationUpdates: false
+            fireANCSAuthorizationUpdates: false,
+            autoGenerateAdvertisementFields: true
         )
     }
 
@@ -324,7 +333,8 @@ public struct EmulatorConfiguration: Sendable {
         l2capSupported: Bool = false,
         l2capPSMRange: ClosedRange<UInt16> = 0x0080...0x00FF,
         fireConnectionEvents: Bool = false,
-        fireANCSAuthorizationUpdates: Bool = false
+        fireANCSAuthorizationUpdates: Bool = false,
+        autoGenerateAdvertisementFields: Bool = true
     ) {
         self.stateUpdateDelay = stateUpdateDelay
         self.scanDiscoveryInterval = scanDiscoveryInterval
@@ -360,5 +370,6 @@ public struct EmulatorConfiguration: Sendable {
         self.l2capPSMRange = l2capPSMRange
         self.fireConnectionEvents = fireConnectionEvents
         self.fireANCSAuthorizationUpdates = fireANCSAuthorizationUpdates
+        self.autoGenerateAdvertisementFields = autoGenerateAdvertisementFields
     }
 }

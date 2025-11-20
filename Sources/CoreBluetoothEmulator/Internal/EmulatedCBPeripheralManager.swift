@@ -39,11 +39,69 @@ public class EmulatedCBPeripheralManager: NSObject, @unchecked Sendable {
             await EmulatorBus.shared.register(peripheral: self, identifier: identifier)
 
             // Call state restoration delegate method if restore identifier was provided
-            if restoreIdentifier != nil, delegate != nil {
-                // TODO: Implement actual state restoration
-                // For now, just notify delegate with empty dict
-                notifyDelegate { delegate in
-                    delegate.peripheralManager(self, willRestoreState: [:])
+            if let restoreId = restoreIdentifier, delegate != nil {
+                do {
+                    // Try to restore state from EmulatorBus
+                    if let restoredState = try await EmulatorBus.shared.restoreState(
+                        identifier: restoreId,
+                        as: EmulatorBus.RestoredPeripheralState.self
+                    ) {
+                        // Build restoration dictionary
+                        var restorationDict: [String: Any] = [:]
+
+                        // Restore advertisement data
+                        if !restoredState.advertisementData.isEmpty {
+                            // Convert Data back to original types
+                            var advData: [String: Any] = [:]
+                            for (key, data) in restoredState.advertisementData {
+                                // Try to decode as string first, otherwise keep as Data
+                                if let string = String(data: data, encoding: .utf8), !string.isEmpty {
+                                    advData[key] = string
+                                } else {
+                                    advData[key] = data
+                                }
+                            }
+                            restorationDict[CBPeripheralManagerRestoredStateAdvertisementDataKey] = advData
+                        }
+
+                        // Restore services array (empty for now, as services are typically re-added by app)
+                        // Note: In real CoreBluetooth, services are restored here, but apps typically
+                        // re-add services in the willRestoreState callback
+                        restorationDict[CBPeripheralManagerRestoredStateServicesKey] = [EmulatedCBMutableService]()
+
+                        // Restore advertising state by restarting if was advertising
+                        if restoredState.isAdvertising, !restoredState.advertisementData.isEmpty {
+                            var advData: [String: Any] = [:]
+                            for (key, data) in restoredState.advertisementData {
+                                if let string = String(data: data, encoding: .utf8), !string.isEmpty {
+                                    advData[key] = string
+                                } else {
+                                    advData[key] = data
+                                }
+                            }
+                            // Will restart advertising after delegate callback
+                            Task { @MainActor [weak self] in
+                                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms delay
+                                self?.startAdvertising(advData)
+                            }
+                        }
+
+                        // Notify delegate with restored state
+                        nonisolated(unsafe) let restoreDict = restorationDict
+                        notifyDelegate { delegate in
+                            delegate.peripheralManager(self, willRestoreState: restoreDict)
+                        }
+                    } else {
+                        // No saved state, notify with empty dict
+                        notifyDelegate { delegate in
+                            delegate.peripheralManager(self, willRestoreState: [:])
+                        }
+                    }
+                } catch {
+                    // Error restoring state, notify with empty dict
+                    notifyDelegate { delegate in
+                        delegate.peripheralManager(self, willRestoreState: [:])
+                    }
                 }
             }
 
