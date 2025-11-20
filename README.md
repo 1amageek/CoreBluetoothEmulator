@@ -83,15 +83,15 @@ dependencies: [
 
 ## Quick Start
 
-### 30秒でわかる使い方
+### 30-Second Tutorial
 
 ```swift
 import CoreBluetoothEmulator
 
-// 1. エミュレータを設定（テスト用は.instant推奨）
+// 1. Configure emulator (.instant recommended for tests)
 await EmulatorBus.shared.configure(.instant)
 
-// 2. Peripheralを作成
+// 2. Create peripheral
 let peripheralManager = EmulatedCBPeripheralManager(delegate: peripheralDelegate, queue: nil)
 let service = EmulatedCBMutableService(type: CBUUID(string: "1234"), primary: true)
 let characteristic = EmulatedCBMutableCharacteristic(
@@ -107,17 +107,17 @@ peripheralManager.startAdvertising([
     CBAdvertisementDataServiceUUIDsKey: [service.uuid]
 ])
 
-// 3. Centralを作成してスキャン
+// 3. Create central and start scanning
 let centralManager = EmulatedCBCentralManager(delegate: centralDelegate, queue: nil)
 centralManager.scanForPeripherals(withServices: nil, options: nil)
 
-// 4. デリゲートで接続・操作
-// → 詳細は下記の完全な例を参照
+// 4. Handle connection and operations in delegates
+// → See complete examples below for details
 ```
 
-## 完全な使い方
+## Complete Usage Guide
 
-### 1. Peripheralの実装（デバイス側）
+### 1. Peripheral Implementation (Device Side)
 
 ```swift
 import CoreBluetoothEmulator
@@ -128,13 +128,13 @@ class MyPeripheralManager: EmulatedCBPeripheralManagerDelegate {
     var heartRateCharacteristic: EmulatedCBMutableCharacteristic!
 
     func setup() async {
-        // エミュレータ設定（開発時は.default、テスト時は.instant）
+        // Configure emulator (.default for development, .instant for tests)
         await EmulatorBus.shared.configure(.default)
 
-        // Peripheral Managerの作成
+        // Create peripheral manager
         peripheralManager = EmulatedCBPeripheralManager(delegate: self, queue: nil)
 
-        // サービスとCharacteristicの定義
+        // Define service and characteristics
         let service = EmulatedCBMutableService(
             type: CBUUID(string: "180D"),  // Heart Rate Service
             primary: true
@@ -157,7 +157,7 @@ class MyPeripheralManager: EmulatedCBPeripheralManagerDelegate {
         service.characteristics = [heartRateCharacteristic, controlCharacteristic]
         peripheralManager.add(service)
 
-        // アドバタイジング開始（全てのフィールドを指定可能）
+        // Start advertising (all fields can be specified)
         peripheralManager.startAdvertising([
             CBAdvertisementDataLocalNameKey: "Heart Rate Monitor",
             CBAdvertisementDataServiceUUIDsKey: [service.uuid],
@@ -191,7 +191,7 @@ class MyPeripheralManager: EmulatedCBPeripheralManagerDelegate {
 
     func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, central: EmulatedCBCentral, didSubscribeTo characteristic: EmulatedCBCharacteristic) {
         print("Central subscribed to \(characteristic.uuid)")
-        // 購読されたら定期的に値を送信
+        // Send periodic updates when subscribed
         sendHeartRateUpdate()
     }
 
@@ -201,14 +201,14 @@ class MyPeripheralManager: EmulatedCBPeripheralManagerDelegate {
 
     func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, didReceiveRead request: EmulatedCBATTRequest) {
         print("Received read request for \(request.characteristic.uuid)")
-        // 値は既にcharacteristicに設定されているので、自動的に返される
+        // Value is already set in characteristic, returned automatically
     }
 
     func peripheralManager(_ peripheral: EmulatedCBPeripheralManager, didReceiveWrite requests: [EmulatedCBATTRequest]) {
         for request in requests {
             if let value = request.value {
                 print("Received write: \(value.map { String(format: "%02x", $0) }.joined())")
-                // 書き込まれた値を処理
+                // Process written value
                 handleControlCommand(value)
             }
         }
@@ -216,7 +216,7 @@ class MyPeripheralManager: EmulatedCBPeripheralManagerDelegate {
 
     func peripheralManagerIsReady(toUpdateSubscribers peripheral: EmulatedCBPeripheralManager) {
         print("Ready to send more notifications")
-        // キューに空きができたので、次の通知を送信可能
+        // Queue has space, can send next notification
     }
 
     // MARK: - Helper Methods
@@ -239,13 +239,13 @@ class MyPeripheralManager: EmulatedCBPeripheralManagerDelegate {
     }
 
     func handleControlCommand(_ data: Data) {
-        // コマンドを処理
+        // Process command
         print("Processing command: \(data)")
     }
 }
 ```
 
-### 2. Centralの実装（アプリ側）
+### 2. Central Implementation (App Side)
 
 ```swift
 import CoreBluetoothEmulator
@@ -257,10 +257,10 @@ class MyCentralManager: EmulatedCBCentralManagerDelegate, EmulatedCBPeripheralDe
     var heartRateCharacteristic: EmulatedCBCharacteristic?
 
     func setup() async {
-        // エミュレータ設定
+        // Configure emulator
         await EmulatorBus.shared.configure(.default)
 
-        // Central Managerの作成
+        // Create central manager
         centralManager = EmulatedCBCentralManager(delegate: self, queue: nil)
     }
 
@@ -291,7 +291,7 @@ class MyCentralManager: EmulatedCBCentralManagerDelegate, EmulatedCBPeripheralDe
         print("Discovered: \(peripheral.name ?? "Unknown") RSSI: \(RSSI)")
         print("Advertisement data: \(advertisementData)")
 
-        // 広告データの各フィールドにアクセス
+        // Access each field of advertisement data
         if let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String {
             print("  Name: \(name)")
         }
@@ -302,7 +302,7 @@ class MyCentralManager: EmulatedCBCentralManagerDelegate, EmulatedCBPeripheralDe
             print("  Manufacturer: \(manufacturerData.map { String(format: "%02x", $0) }.joined())")
         }
 
-        // 最初に見つけたデバイスに接続
+        // Connect to first discovered device
         discoveredPeripheral = peripheral
         centralManager.stopScan()
         centralManager.connect(peripheral, options: nil)
@@ -311,10 +311,10 @@ class MyCentralManager: EmulatedCBCentralManagerDelegate, EmulatedCBPeripheralDe
     func centralManager(_ central: EmulatedCBCentralManager, didConnect peripheral: EmulatedCBPeripheral) {
         print("Connected to \(peripheral.name ?? "Unknown")")
 
-        // ペリフェラルのデリゲートを設定
+        // Set peripheral delegate
         peripheral.delegate = self
 
-        // サービスを検索
+        // Discover services
         peripheral.discoverServices([CBUUID(string: "180D")])
     }
 
@@ -346,7 +346,7 @@ class MyCentralManager: EmulatedCBCentralManagerDelegate, EmulatedCBPeripheralDe
 
         for service in services {
             print("Found service: \(service.uuid)")
-            // Characteristicを検索
+            // Discover characteristics
             peripheral.discoverCharacteristics(nil, for: service)
         }
     }
@@ -371,12 +371,12 @@ class MyCentralManager: EmulatedCBCentralManagerDelegate, EmulatedCBPeripheralDe
                 // Heart Rate Measurement
                 heartRateCharacteristic = characteristic
 
-                // 読み取り
+                // Read value
                 if characteristic.properties.contains(.read) {
                     peripheral.readValue(for: characteristic)
                 }
 
-                // 通知を購読
+                // Subscribe to notifications
                 if characteristic.properties.contains(.notify) {
                     peripheral.setNotifyValue(true, for: characteristic)
                 }
@@ -601,9 +601,9 @@ func peripheralManagerIsReady(toUpdateSubscribers peripheral: EmulatedCBPeripher
 }
 ```
 
-## よくあるユースケース
+## Common Use Cases
 
-### テストでの使い方
+### Testing
 
 ```swift
 import XCTest
@@ -615,19 +615,19 @@ class BluetoothTests: XCTestCase {
     var peripheralManager: EmulatedCBPeripheralManager!
 
     override func setUp() async throws {
-        // テスト開始前にエミュレータをリセット
+        // Reset emulator before each test
         await EmulatorBus.shared.reset()
 
-        // 高速テスト用の設定
+        // Configure for fast testing
         await EmulatorBus.shared.configure(.instant)
 
-        // テスト用のマネージャーを作成
+        // Create test managers
         centralManager = EmulatedCBCentralManager(delegate: centralDelegate, queue: nil)
         peripheralManager = EmulatedCBPeripheralManager(delegate: peripheralDelegate, queue: nil)
     }
 
     func testDiscoveryAndConnection() async throws {
-        // Peripheralをセットアップ
+        // Setup peripheral
         let service = EmulatedCBMutableService(type: CBUUID(string: "1234"), primary: true)
         peripheralManager.add(service)
         peripheralManager.startAdvertising([
@@ -635,29 +635,29 @@ class BluetoothTests: XCTestCase {
             CBAdvertisementDataServiceUUIDsKey: [service.uuid]
         ])
 
-        // スキャン開始
+        // Start scanning
         centralManager.scanForPeripherals(withServices: nil, options: nil)
 
-        // 発見を待つ
+        // Wait for discovery
         try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
 
-        // アサーション
+        // Assert
         XCTAssertEqual(centralDelegate.discoveredPeripherals.count, 1)
     }
 }
 ```
 
-### 本番コードとテストコードの切り替え
+### Switching Between Production and Test Code
 
 ```swift
-// プロトコルで抽象化
+// Abstract with protocol
 protocol BluetoothCentralManager {
     func scanForPeripherals(withServices: [CBUUID]?, options: [String: Any]?)
     func connect(_ peripheral: BluetoothPeripheral, options: [String: Any]?)
     // ...
 }
 
-// 実機用の実装
+// Real hardware implementation
 class RealCentralManager: BluetoothCentralManager {
     private let manager: CBCentralManager
 
@@ -667,7 +667,7 @@ class RealCentralManager: BluetoothCentralManager {
     // ...
 }
 
-// エミュレータ用の実装
+// Emulator implementation
 class EmulatedCentralManager: BluetoothCentralManager {
     private let manager: EmulatedCBCentralManager
 
@@ -677,7 +677,7 @@ class EmulatedCentralManager: BluetoothCentralManager {
     // ...
 }
 
-// DIで切り替え
+// Switch using DI
 class App {
     let bluetoothManager: BluetoothCentralManager
 
@@ -691,20 +691,20 @@ class App {
 }
 ```
 
-### MTUの管理
+### MTU Management
 
 ```swift
-// iOS 15+ でMTUを取得
+// Get MTU on iOS 15+
 if #available(iOS 15.0, *) {
     let currentMTU = peripheral.mtu
     print("Current MTU: \(currentMTU)")
 
-    // 最大書き込みサイズを計算
+    // Calculate maximum write size
     let maxWriteLength = peripheral.maximumWriteValueLength(for: .withResponse)
     print("Max write length: \(maxWriteLength)")
 }
 
-// MTUを考慮したデータ送信
+// Send data considering MTU
 func sendLargeData(_ data: Data, to characteristic: EmulatedCBCharacteristic) {
     let maxLength = peripheral.maximumWriteValueLength(for: .withoutResponse)
     var offset = 0
@@ -713,12 +713,12 @@ func sendLargeData(_ data: Data, to characteristic: EmulatedCBCharacteristic) {
         let chunkSize = min(maxLength, data.count - offset)
         let chunk = data.subdata(in: offset..<offset + chunkSize)
 
-        // バックプレッシャをチェック
+        // Check backpressure
         if peripheral.canSendWriteWithoutResponse {
             peripheral.writeValue(chunk, for: characteristic, type: .withoutResponse)
             offset += chunkSize
         } else {
-            // キューが満杯なので待機
+            // Queue is full, wait
             print("Queue full, waiting...")
             break
         }
@@ -726,16 +726,16 @@ func sendLargeData(_ data: Data, to characteristic: EmulatedCBCharacteristic) {
 }
 ```
 
-### エラーハンドリング
+### Error Handling
 
 ```swift
-// 接続エラーのシミュレーション
+// Simulate connection errors
 var config = EmulatorConfiguration.default
 config.simulateConnectionFailure = true
-config.connectionFailureRate = 0.3  // 30%の確率で失敗
+config.connectionFailureRate = 0.3  // 30% failure rate
 await EmulatorBus.shared.configure(config)
 
-// デリゲートで処理
+// Handle in delegate
 func centralManager(
     _ central: EmulatedCBCentralManager,
     didFailToConnect peripheral: EmulatedCBPeripheral,
@@ -745,7 +745,7 @@ func centralManager(
         switch error.code {
         case .connectionFailed:
             print("Connection failed, retrying...")
-            // リトライロジック
+            // Retry logic
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 central.connect(peripheral, options: nil)
             }
@@ -755,9 +755,9 @@ func centralManager(
     }
 }
 
-// 読み書きエラーのシミュレーション
+// Simulate read/write errors
 config.simulateReadWriteErrors = true
-config.readWriteErrorRate = 0.1  // 10%の確率で失敗
+config.readWriteErrorRate = 0.1  // 10% error rate
 
 func peripheral(
     _ peripheral: EmulatedCBPeripheral,
@@ -777,121 +777,121 @@ func peripheral(
 }
 ```
 
-## トラブルシューティング
+## Troubleshooting
 
-### 問題: デバイスが発見されない
+### Issue: Device Not Discovered
 
-**原因と解決策:**
+**Causes and Solutions:**
 
-1. **エミュレータが設定されていない**
+1. **Emulator not configured**
    ```swift
-   // 解決: 明示的に設定
+   // Solution: Configure explicitly
    await EmulatorBus.shared.configure(.instant)
    ```
 
-2. **Peripheralがアドバタイズを開始していない**
+2. **Peripheral not advertising**
    ```swift
-   // 確認: isAdvertising をチェック
+   // Check: Verify isAdvertising
    print("Is advertising: \(peripheralManager.isAdvertising)")
 
-   // 解決: startAdvertising を呼ぶ
+   // Solution: Call startAdvertising
    peripheralManager.startAdvertising([
        CBAdvertisementDataLocalNameKey: "Device",
        CBAdvertisementDataServiceUUIDsKey: [serviceUUID]
    ])
    ```
 
-3. **サービスUUIDでフィルタリングされている**
+3. **Filtered by service UUID**
    ```swift
-   // 問題のあるコード
+   // Problematic code
    centralManager.scanForPeripherals(
-       withServices: [CBUUID(string: "1234")],  // このサービスを持つデバイスのみ
+       withServices: [CBUUID(string: "1234")],  // Only devices with this service
        options: nil
    )
 
-   // 解決: 全デバイスをスキャン
+   // Solution: Scan for all devices
    centralManager.scanForPeripherals(withServices: nil, options: nil)
    ```
 
-### 問題: 通知が受信されない
+### Issue: Notifications Not Received
 
-**原因と解決策:**
+**Causes and Solutions:**
 
-1. **Characteristicに notify プロパティがない**
+1. **Characteristic missing notify property**
    ```swift
-   // 問題
+   // Problem
    let char = EmulatedCBMutableCharacteristic(
        type: uuid,
-       properties: [.read],  // notifyがない
+       properties: [.read],  // Missing notify
        value: nil,
        permissions: [.readable]
    )
 
-   // 解決
+   // Solution
    let char = EmulatedCBMutableCharacteristic(
        type: uuid,
-       properties: [.read, .notify],  // notifyを追加
+       properties: [.read, .notify],  // Add notify
        value: nil,
        permissions: [.readable]
    )
    ```
 
-2. **購読していない**
+2. **Not subscribed**
    ```swift
-   // 解決: setNotifyValue を呼ぶ
+   // Solution: Call setNotifyValue
    peripheral.setNotifyValue(true, for: characteristic)
    ```
 
-3. **購読完了前に送信している**
+3. **Sending before subscription completes**
    ```swift
-   // 問題: 即座に送信
+   // Problem: Send immediately
    peripheral.setNotifyValue(true, for: characteristic)
    peripheralManager.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
 
-   // 解決: デリゲートコールバックを待つ
+   // Solution: Wait for delegate callback
    func peripheralManager(
        _ peripheral: EmulatedCBPeripheralManager,
        central: EmulatedCBCentral,
        didSubscribeTo characteristic: EmulatedCBCharacteristic
    ) {
-       // ここで送信
+       // Send here
        peripheralManager.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
    }
    ```
 
-### 問題: Write Without Response が送信できない
+### Issue: Write Without Response Cannot Send
 
-**原因と解決策:**
+**Causes and Solutions:**
 
-1. **バックプレッシャが有効でキューが満杯**
+1. **Backpressure enabled and queue full**
    ```swift
-   // 確認
+   // Check
    if !peripheral.canSendWriteWithoutResponse {
        print("Queue is full")
    }
 
-   // 解決: 準備完了コールバックを待つ
+   // Solution: Wait for ready callback
    func peripheralIsReady(toSendWriteWithoutResponse peripheral: EmulatedCBPeripheral) {
-       // ここで再送信
+       // Resend here
        peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
    }
    ```
 
-2. **バックプレッシャ設定を無効化（テスト時）**
+2. **Disable backpressure (for testing)**
    ```swift
    var config = EmulatorConfiguration.instant
-   config.simulateBackpressure = false  // キュー制限なし
+   config.simulateBackpressure = false  // No queue limit
    await EmulatorBus.shared.configure(config)
    ```
 
-### 問題: updateValue が false を返す
+### Issue: updateValue Returns false
 
-**原因と解決策:**
+**Causes and Solutions:**
 
-通知キューが満杯です：
+Notification queue is full:
 
 ```swift
-// 確認: updateValue の戻り値をチェック
+// Check: Verify updateValue return value
 let success = peripheralManager.updateValue(
     data,
     for: characteristic,
@@ -902,74 +902,74 @@ if !success {
     print("Notification queue full")
 }
 
-// 解決: 準備完了コールバックを待つ
+// Solution: Wait for ready callback
 func peripheralManagerIsReady(toUpdateSubscribers peripheral: EmulatedCBPeripheralManager) {
-    // キューに空きができた
+    // Queue has space
     let success = peripheral.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
 }
 ```
 
-### 問題: タイミング関連のテスト失敗
+### Issue: Timing-Related Test Failures
 
-**解決策:**
+**Solutions:**
 
-1. **.instant 設定を使用**
+1. **Use .instant configuration**
    ```swift
    await EmulatorBus.shared.configure(.instant)
    ```
 
-2. **適切な待機時間を設定**
+2. **Add appropriate wait times**
    ```swift
-   // 悪い例
+   // Bad example
    centralManager.scanForPeripherals(withServices: nil, options: nil)
-   XCTAssertEqual(discoveredDevices.count, 1)  // 即座にチェック
+   XCTAssertEqual(discoveredDevices.count, 1)  // Check immediately
 
-   // 良い例
+   // Good example
    centralManager.scanForPeripherals(withServices: nil, options: nil)
-   try await Task.sleep(nanoseconds: 100_000_000)  // 100ms待つ
+   try await Task.sleep(nanoseconds: 100_000_000)  // Wait 100ms
    XCTAssertEqual(discoveredDevices.count, 1)
    ```
 
-### 問題: 複数テスト実行時の干渉
+### Issue: Test Interference with Multiple Tests
 
-**解決策:**
+**Solution:**
 
-各テスト前にリセット：
+Reset before each test:
 
 ```swift
 override func setUp() async throws {
-    await EmulatorBus.shared.reset()  // 重要！
+    await EmulatorBus.shared.reset()  // Important!
     await EmulatorBus.shared.configure(.instant)
 }
 ```
 
-## ベストプラクティス
+## Best Practices
 
-### 1. 設定の選択
+### 1. Configuration Selection
 
-- **開発時**: `.default` - リアルなタイミングで動作を確認
-- **単体テスト**: `.instant` - 高速実行
-- **統合テスト**: `.default` or `.slow` - 実機に近い条件でテスト
-- **負荷テスト**: `.unreliable` - エラー処理を検証
+- **Development**: `.default` - Realistic timing for verification
+- **Unit Tests**: `.instant` - Fast execution
+- **Integration Tests**: `.default` or `.slow` - Conditions close to real hardware
+- **Load Tests**: `.unreliable` - Verify error handling
 
-### 2. テストの分離
+### 2. Test Isolation
 
 ```swift
-// 各テストでリセット
+// Reset for each test
 override func setUp() async throws {
     await EmulatorBus.shared.reset()
 }
 
-// 特定の設定が必要な場合
+// For tests requiring specific configuration
 func testSlowConnection() async throws {
     await EmulatorBus.shared.configure(.slow)
-    // テスト...
+    // Test...
 }
 ```
 
-### 3. エラーハンドリング
+### 3. Error Handling
 
-全てのデリゲートメソッドでエラーをチェック：
+Check errors in all delegate methods:
 
 ```swift
 func peripheral(
@@ -977,23 +977,23 @@ func peripheral(
     didDiscoverServices error: Error?
 ) {
     if let error = error {
-        // エラー処理
+        // Handle error
         return
     }
-    // 正常処理
+    // Normal processing
 }
 ```
 
-### 4. リソース管理
+### 4. Resource Management
 
 ```swift
-// 不要になったらスキャン停止
+// Stop scanning when not needed
 centralManager.stopScan()
 
-// 接続解除
+// Disconnect
 centralManager.cancelPeripheralConnection(peripheral)
 
-// アドバタイズ停止
+// Stop advertising
 peripheralManager.stopAdvertising()
 ```
 
