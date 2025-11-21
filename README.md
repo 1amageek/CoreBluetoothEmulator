@@ -60,27 +60,60 @@ CoreBluetoothEmulator is a pure-Swift implementation that emulates the full Core
 - **Service Filtering**: Proper filtering by service UUIDs
 - **Subscription Management**: isNotifying state and subscriber tracking
 
-#### Multi-Process Support (NEW)
+#### Multi-Process Support (✅ FULLY IMPLEMENTED)
 - **Cross-Process Communication**: Test distributed BLE applications without hardware
 - **Transport Layer**: Pluggable transport for inter-process event routing
-- **Built-in Transports**:
-  - `InMemoryEmulatorTransport`: In-process simulation (perfect for testing)
-  - `XPCEmulatorTransport`: Real cross-process via XPC (macOS/iOS)
-- **Use Cases**:
-  - Test iPhone ↔ Apple Watch communication
-  - Verify serialization/deserialization in distributed actor systems
-  - Simulate real device-to-device scenarios without physical hardware
+- **Event Serialization**: All BLE operations (scan, connect, read, write, notify) are Codable
+- **Remote Event Handlers**: Complete implementation for distributed mode
+- **Automatic Event Routing**: Operations in distributed mode automatically send events to remote processes
 
+**Built-in Transports:**
+- `InMemoryEmulatorTransport`: In-process simulation with hub-based routing (perfect for testing)
+- `XPCEmulatorTransport`: Real cross-process communication via XPC (macOS/iOS)
+
+**Supported Operations:**
+- ✅ Scanning: Remote centrals receive scan requests, local peripherals send discovery events
+- ✅ Connection: Bidirectional connection establishment with proper handshake
+- ✅ Read/Write: Characteristic read/write operations routed across processes
+- ✅ Notifications: Value updates sent from remote peripherals to local centrals
+- ✅ Service Discovery: Complete GATT hierarchy accessible across processes
+
+**Use Cases:**
+- Test iPhone ↔ Apple Watch communication patterns
+- Verify serialization/deserialization in distributed actor systems (e.g., Swift Distributed Actors)
+- Simulate real device-to-device scenarios without physical hardware
+- Test BLE-based RPC frameworks like Bleu
+
+**Example Usage:**
 ```swift
+// Create shared hub
+let hub = InMemoryEmulatorTransport.Hub()
+
 // Process A (Peripheral)
-let peripheralTransport = InMemoryEmulatorTransport(hub: hub, role: .peripheral)
+let peripheralTransport = InMemoryEmulatorTransport(
+    hub: hub,
+    processID: peripheralID,
+    role: .peripheral
+)
+await peripheralTransport.start()
 await EmulatorBus.shared.configure(transport: .distributed(peripheralTransport))
 
+// Now when peripheral starts advertising, scan events from remote centrals are received
+let peripheralManager = EmulatedCBPeripheralManager(...)
+peripheralManager.startAdvertising(...)
+
 // Process B (Central)
-let centralTransport = InMemoryEmulatorTransport(hub: hub, role: .central)
+let centralTransport = InMemoryEmulatorTransport(
+    hub: hub,
+    processID: centralID,
+    role: .central
+)
+await centralTransport.start()
 await EmulatorBus.shared.configure(transport: .distributed(centralTransport))
 
-// Now both processes can communicate via the transport
+// Now when central scans, it discovers peripherals in remote processes
+let centralManager = EmulatedCBCentralManager(...)
+centralManager.scanForPeripherals(...)
 ```
 
 #### Configuration System

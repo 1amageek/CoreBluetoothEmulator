@@ -52,10 +52,28 @@ swift test --filter CoreBluetoothEmulatorTests.<TestClassName>/<testMethodName>
 
 All cross-device communication flows through `EmulatorBus`:
 
+#### In-Process Mode (default)
 1. **Scanning/Advertising**: Central calls `scanForPeripherals()` → EmulatorBus matches with advertising peripherals → Central receives `didDiscover` callback
 2. **Connection**: Central calls `connect()` → EmulatorBus establishes connection → Both sides notified
 3. **Service Discovery**: Peripheral calls `discoverServices()` → EmulatorBus retrieves from peripheral manager → Peripheral receives `didDiscoverServices`
 4. **Read/Write**: Peripheral sends request → EmulatorBus routes to peripheral manager → Response routed back through EmulatorBus
+
+#### Distributed Mode (multi-process)
+1. **Scanning**: Central calls `scanForPeripherals()` → EmulatorBus sends `.scanStarted` event via transport → Remote peripheral's EmulatorBus receives event → Sends `.peripheralDiscovered` event back → Central receives `didDiscover` callback
+2. **Connection**: Central calls `connect()` → EmulatorBus sends `.connectionRequested` event → Remote peripheral processes request → Sends `.connectionEstablished` event back → Both sides notified
+3. **Write**: Central calls `writeValue()` → EmulatorBus sends `.writeRequested` event → Remote peripheral processes write → Sends `.writeResponse` event back (for withResponse type)
+4. **Notification**: Peripheral calls `updateValue()` → EmulatorBus sends `.notificationSent` event → Remote central receives notification
+
+**Transport Mode Configuration:**
+```swift
+// Default in-process mode
+await EmulatorBus.shared.configure(transport: .inProcess)
+
+// Distributed mode with custom transport
+let transport = InMemoryEmulatorTransport(hub: hub, processID: processID, role: .peripheral)
+await transport.start()
+await EmulatorBus.shared.configure(transport: .distributed(transport))
+```
 
 ### Class Hierarchy
 
@@ -126,6 +144,12 @@ await EmulatorBus.shared.configure(.instant)  // For tests
 - Background Mode: Service UUID requirement for background scanning
 - L2CAP Channels (iOS 11+): Stream-based data transfer with encryption support (requires `l2capSupported = true`)
 - ANCS Authorization (iOS 13.1+): Authorization status tracking and updates (requires `fireANCSAuthorizationUpdates = true`)
+- **Multi-Process Support**: Complete cross-process communication implementation
+  - Event serialization for all BLE operations (scan, connect, read, write, notify)
+  - Remote event handlers for distributed mode
+  - Automatic event routing via pluggable transports
+  - InMemoryEmulatorTransport for testing
+  - XPCEmulatorTransport for real cross-process communication (macOS/iOS)
 
 **Configuration Flags Required**:
 - Scan options work by default (`honorAllowDuplicatesOption = true` by default)
@@ -233,6 +257,12 @@ centralManager.scanForPeripherals(withServices: serviceUUIDs, options: options)
 
 **L2CAP:**
 - `Sources/CoreBluetoothEmulator/Internal/EmulatedCBL2CAPChannel.swift`: L2CAP channel with input/output streams
+
+**Multi-Process Transport:**
+- `Sources/CoreBluetoothEmulator/Transport/EmulatorTransport.swift`: Transport protocol and configuration types
+- `Sources/CoreBluetoothEmulator/EmulatorInternalEvent.swift`: Codable event types for all BLE operations
+- `Sources/CoreBluetoothEmulator/Transport/InMemoryEmulatorTransport.swift`: Hub-based in-memory transport for testing
+- `Sources/CoreBluetoothEmulator/Transport/XPCEmulatorTransport.swift`: XPC-based cross-process transport (macOS/iOS)
 
 **Protocols:**
 - `Sources/CoreBluetoothEmulator/EmulatedDelegates.swift`: All emulated delegate protocols with default implementations
