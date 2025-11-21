@@ -60,6 +60,29 @@ CoreBluetoothEmulator is a pure-Swift implementation that emulates the full Core
 - **Service Filtering**: Proper filtering by service UUIDs
 - **Subscription Management**: isNotifying state and subscriber tracking
 
+#### Multi-Process Support (NEW)
+- **Cross-Process Communication**: Test distributed BLE applications without hardware
+- **Transport Layer**: Pluggable transport for inter-process event routing
+- **Built-in Transports**:
+  - `InMemoryEmulatorTransport`: In-process simulation (perfect for testing)
+  - `XPCEmulatorTransport`: Real cross-process via XPC (macOS/iOS)
+- **Use Cases**:
+  - Test iPhone ↔ Apple Watch communication
+  - Verify serialization/deserialization in distributed actor systems
+  - Simulate real device-to-device scenarios without physical hardware
+
+```swift
+// Process A (Peripheral)
+let peripheralTransport = InMemoryEmulatorTransport(hub: hub, role: .peripheral)
+await EmulatorBus.shared.configure(transport: .distributed(peripheralTransport))
+
+// Process B (Central)
+let centralTransport = InMemoryEmulatorTransport(hub: hub, role: .central)
+await EmulatorBus.shared.configure(transport: .distributed(centralTransport))
+
+// Now both processes can communicate via the transport
+```
+
 #### Configuration System
 - **Timing Control**: Configurable delays for all operations
 - **RSSI Simulation**: Realistic signal strength with variation

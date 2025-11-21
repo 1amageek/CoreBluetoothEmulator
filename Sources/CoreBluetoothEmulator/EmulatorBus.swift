@@ -8,6 +8,17 @@ public actor EmulatorBus {
 
     public static let shared = EmulatorBus()
 
+    // MARK: - Transport Mode
+
+    /// Transport mode for cross-process communication
+    public enum TransportMode {
+        case inProcess           // Default: single-process operation
+        case distributed(any EmulatorTransport)  // Multi-process via transport
+    }
+
+    private var transportMode: TransportMode = .inProcess
+    private var transportReceiveTask: Task<Void, Never>?
+
     // MARK: - State
 
     private var centrals: [UUID: CentralRegistration] = [:]
@@ -135,6 +146,18 @@ public actor EmulatorBus {
             registration.scanOptions = options
             registration.discoveredPeripheralsDuringScan = []
             centrals[centralIdentifier] = registration
+        }
+
+        // Send scan started event in distributed mode
+        if case .distributed = transportMode {
+            let serviceData = services?.map { $0.data }
+            let event = EmulatorInternalEvent.scanStarted(
+                centralID: centralIdentifier,
+                serviceUUIDs: serviceData
+            )
+            Task {
+                try? await sendEvent(event)
+            }
         }
 
         // Start periodic discovery notifications
@@ -285,6 +308,17 @@ public actor EmulatorBus {
     // MARK: - Connection Management
 
     public func connect(centralIdentifier: UUID, peripheralIdentifier: UUID) async throws {
+        // Send connection request event in distributed mode
+        if case .distributed = transportMode {
+            let event = EmulatorInternalEvent.connectionRequested(
+                centralID: centralIdentifier,
+                peripheralID: peripheralIdentifier
+            )
+            try await sendEvent(event)
+            // In distributed mode, wait for connection established response
+            // For now, we proceed with local connection establishment
+        }
+
         // Simulate connection delay
         if configuration.connectionDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(configuration.connectionDelay * 1_000_000_000))
@@ -505,6 +539,20 @@ public actor EmulatorBus {
             throw CBError(.notConnected)
         }
 
+        // Send write request event in distributed mode
+        if case .distributed = transportMode {
+            let event = EmulatorInternalEvent.writeRequested(
+                centralID: centralIdentifier,
+                peripheralID: peripheralIdentifier,
+                characteristicUUID: characteristic.uuid.data,
+                value: data,
+                type: type.rawValue
+            )
+            try await sendEvent(event)
+            // In distributed mode, the write would be handled by remote peripheral
+            // For now, we also process it locally if the peripheral exists locally
+        }
+
         // Check if pairing is required
         if requiresPairing(characteristic: characteristic) {
             if !isPaired(centralIdentifier: centralIdentifier, peripheralIdentifier: peripheralIdentifier) {
@@ -672,6 +720,20 @@ public actor EmulatorBus {
                 targetCentrals = connections
                     .filter { $0.value.contains(peripheralIdentifier) }
                     .map { $0.key }
+            }
+        }
+
+        // Send notification event in distributed mode
+        if case .distributed = transportMode {
+            for centralId in targetCentrals {
+                let event = EmulatorInternalEvent.notificationSent(
+                    peripheralID: peripheralIdentifier,
+                    characteristicUUID: characteristic.uuid.data,
+                    value: value
+                )
+                Task {
+                    try? await sendEvent(event)
+                }
             }
         }
 
@@ -1110,5 +1172,216 @@ public actor EmulatorBus {
         openL2CAPChannels.removeAll()
         ancsAuthorizationStatus.removeAll()
         configuration = .default
+
+        // Cancel transport receive task
+        transportReceiveTask?.cancel()
+        transportReceiveTask = nil
+        transportMode = .inProcess
+    }
+
+    // MARK: - Transport Configuration
+
+    /// Configure transport mode for cross-process communication
+    /// - Parameter transport: Transport mode (.inProcess or .distributed)
+    /// - Note: This should be called once at initialization before any BLE operations
+    public func configure(transport: TransportMode) {
+        // Cancel existing transport receive task
+        transportReceiveTask?.cancel()
+        transportReceiveTask = nil
+
+        self.transportMode = transport
+
+        // Start receive task for distributed mode
+        if case .distributed(let transportImpl) = transport {
+            transportReceiveTask = Task {
+                await startReceivingEvents(from: transportImpl)
+            }
+        }
+    }
+
+    /// Start receiving events from transport
+    private func startReceivingEvents(from transport: any EmulatorTransport) async {
+        for await (sourceID, data) in transport.receive() {
+            do {
+                let event = try JSONDecoder().decode(EmulatorInternalEvent.self, from: data)
+                await handleTransportEvent(event, from: sourceID)
+            } catch {
+                print("EmulatorBus: Failed to decode transport event: \(error)")
+            }
+        }
+    }
+
+    /// Handle event received from transport
+    private func handleTransportEvent(_ event: EmulatorInternalEvent, from sourceID: UUID) async {
+        // Route event to appropriate handler based on event type
+        switch event {
+        case .scanStarted(let centralID, let serviceUUIDs):
+            await handleRemoteScanStarted(centralID: centralID, serviceUUIDs: serviceUUIDs)
+
+        case .connectionRequested(let centralID, let peripheralID):
+            await handleRemoteConnectionRequest(centralID: centralID, peripheralID: peripheralID)
+
+        case .writeRequested(let centralID, let peripheralID, let charUUID, let value, let type):
+            await handleRemoteWrite(
+                centralID: centralID,
+                peripheralID: peripheralID,
+                characteristicUUID: charUUID,
+                value: value,
+                type: CBCharacteristicWriteType(rawValue: type) ?? .withResponse
+            )
+
+        case .notificationSent(let peripheralID, let charUUID, let value):
+            await handleRemoteNotification(
+                peripheralID: peripheralID,
+                characteristicUUID: charUUID,
+                value: value
+            )
+
+        // Add more event handlers as needed
+        default:
+            print("EmulatorBus: Unhandled transport event: \(event)")
+        }
+    }
+
+    /// Send event via transport
+    private func sendEvent(_ event: EmulatorInternalEvent) async throws {
+        guard case .distributed(let transport) = transportMode else {
+            return // In-process mode, no need to send
+        }
+
+        let data = try JSONEncoder().encode(event)
+        try await transport.send(data, to: event.targetID)
+    }
+
+    // MARK: - Remote Event Handlers
+
+    private func handleRemoteScanStarted(centralID: UUID, serviceUUIDs: [Data]?) async {
+        // Remote central started scanning - check if we have matching advertising peripherals
+        guard case .distributed = transportMode else { return }
+
+        // Convert Data back to CBUUID
+        let scanServices = serviceUUIDs?.compactMap { CBUUID(data: $0) }
+
+        // Check local advertising peripherals
+        for peripheralID in advertisingPeripherals {
+            guard let peripheralReg = peripherals[peripheralID] else { continue }
+
+            // Check service filter
+            if let scanServices = scanServices, !scanServices.isEmpty {
+                if let advertisedServices = peripheralReg.advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] {
+                    let hasMatch = advertisedServices.contains { scanServices.contains($0) }
+                    if !hasMatch { continue }
+                } else {
+                    continue
+                }
+            }
+
+            // Generate RSSI
+            let rssi = NSNumber(value: Int.random(in: configuration.rssiRange))
+
+            // Convert advertisement data to CodableValue
+            let codableAdvData = peripheralReg.advertisementData.toCodable()
+
+            // Send discovery event back to remote central
+            let event = EmulatorInternalEvent.peripheralDiscovered(
+                centralID: centralID,
+                peripheralID: peripheralID,
+                advertisementData: codableAdvData,
+                rssi: rssi.intValue
+            )
+
+            try? await sendEvent(event)
+        }
+    }
+
+    private func handleRemoteConnectionRequest(centralID: UUID, peripheralID: UUID) async {
+        // Remote central wants to connect to local peripheral
+        guard case .distributed = transportMode else { return }
+        guard peripherals[peripheralID] != nil else {
+            // Send connection failed event
+            let event = EmulatorInternalEvent.connectionFailed(
+                centralID: centralID,
+                peripheralID: peripheralID,
+                error: String(CBError.Code.peripheralDisconnected.rawValue)
+            )
+            try? await sendEvent(event)
+            return
+        }
+
+        // Simulate connection delay
+        if configuration.connectionDelay > 0 {
+            try? await Task.sleep(nanoseconds: UInt64(configuration.connectionDelay * 1_000_000_000))
+        }
+
+        // Simulate connection failure if configured
+        if configuration.simulateConnectionFailure {
+            if Double.random(in: 0...1) < configuration.connectionFailureRate {
+                let event = EmulatorInternalEvent.connectionFailed(
+                    centralID: centralID,
+                    peripheralID: peripheralID,
+                    error: String(CBError.Code.connectionFailed.rawValue)
+                )
+                try? await sendEvent(event)
+                return
+            }
+        }
+
+        // Send connection established event back
+        let event = EmulatorInternalEvent.connectionEstablished(
+            centralID: centralID,
+            peripheralID: peripheralID
+        )
+        try? await sendEvent(event)
+    }
+
+    private func handleRemoteWrite(
+        centralID: UUID,
+        peripheralID: UUID,
+        characteristicUUID: Data,
+        value: Data,
+        type: CBCharacteristicWriteType
+    ) async {
+        // Remote central wrote to local peripheral's characteristic
+        guard case .distributed = transportMode else { return }
+        guard peripherals[peripheralID] != nil else {
+            return
+        }
+
+        // In distributed mode, the write would be handled by the peripheral manager's
+        // didReceiveWrite delegate callback on the peripheral side.
+        // For now, we acknowledge the write if it's withResponse type
+
+        // Simulate write delay
+        if configuration.writeDelay > 0 {
+            try? await Task.sleep(nanoseconds: UInt64(configuration.writeDelay * 1_000_000_000))
+        }
+
+        // For writeWithResponse, send response back
+        if type == .withResponse {
+            let event = EmulatorInternalEvent.writeResponse(
+                centralID: centralID,
+                peripheralID: peripheralID,
+                characteristicUUID: characteristicUUID,
+                error: nil
+            )
+            try? await sendEvent(event)
+        }
+    }
+
+    private func handleRemoteNotification(
+        peripheralID: UUID,
+        characteristicUUID: Data,
+        value: Data
+    ) async {
+        // Remote peripheral sent notification - deliver to local central if subscribed
+        guard case .distributed = transportMode else { return }
+
+        // This would be called when a remote peripheral sends a notification
+        // We need to find which local central(s) are subscribed
+        // Note: In current implementation, subscription tracking is local
+        // For distributed mode, we'd need to track remote subscriptions
+
+        // For now, this is a placeholder as subscription management
+        // would need to be enhanced for distributed mode
     }
 }

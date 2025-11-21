@@ -6,6 +6,13 @@ import CoreBluetooth
 // All emulated classes are directly exported
 // No type aliases - users will use Emulated* classes directly
 
+// Transport types are available via:
+// - InMemoryEmulatorTransport
+// - XPCEmulatorTransport (macOS/iOS)
+// - EmulatorInternalEvent
+// - EmulatorProcessRole
+// - CodableValue
+
 // MARK: - Emulator Configuration
 
 /// Emulator configuration namespace
